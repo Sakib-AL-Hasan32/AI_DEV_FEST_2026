@@ -48,6 +48,10 @@
   --radius-lg: 16px;
 }
 
+html {
+  scroll-padding-top: 90px;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -257,6 +261,7 @@ header {
   margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s ease;
+  scroll-margin-top: 90px;
 }
 
 .card:hover {
@@ -314,11 +319,18 @@ header {
   cursor: pointer;
   transition: all 0.2s ease;
   position: relative;
+  user-select: none;
 }
 
 .dropzone:hover, .dropzone.dragover {
   border-color: var(--primary);
   background: var(--primary-light);
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-color: var(--primary);
 }
 
 .dropzone-icon {
@@ -349,16 +361,6 @@ header {
 .dropzone-desc {
   font-size: 13px;
   color: var(--text-muted);
-}
-
-.dropzone input[type="file"] {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
 }
 
 /* Tender Metadata Display Grid */
@@ -413,7 +415,7 @@ header {
 
 .file-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 12px;
   margin-top: 10px;
 }
@@ -443,20 +445,31 @@ header {
 .file-main {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+}
+
+.file-thumb-canvas {
+  width: 36px;
+  height: 48px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }
 
 .file-icon {
   width: 36px;
-  height: 36px;
+  height: 48px;
   background: #fee2e2;
   color: #ef4444;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 1px solid #fca5a5;
 }
 
 .file-icon svg {
@@ -483,7 +496,8 @@ header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 2px;
+  margin-top: 3px;
+  flex-wrap: wrap;
 }
 
 .file-badge-duplicate {
@@ -494,6 +508,27 @@ header {
   background: #fee2e2;
   padding: 2px 6px;
   border-radius: 4px;
+  border: 1px solid #fca5a5;
+}
+
+.file-match-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.file-match-tag.matched {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.file-match-tag.unmatched {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
 }
 
 .btn-remove {
@@ -677,7 +712,7 @@ tbody tr:hover {
   border-color: #e2e8f0;
 }
 
-/* Status Badges */
+/* Status Badges with Accessible Icons (Section 10) */
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -687,6 +722,11 @@ tbody tr:hover {
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.status-pill .status-icon {
+  font-weight: 800;
+  font-size: 13px;
 }
 
 .status-ok {

@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Tender Document Package Builder</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- pdf-lib CDN for client-side PDF merging and footer stamping -->
-  <script src="https://unpkg.com/pdf-lib@1.17.9/dist/pdf-lib.min.js"></script>
+  
+  <!-- Local offline-ready libraries for 100% reliability -->
+  <script src="pdf-lib.min.js"></script>
+  <script src="pdf.min.js"></script>
 </head>
 <body>
 
@@ -116,8 +118,8 @@
         </div>
       </div>
 
-      <div class="dropzone" id="jsonDropzone">
-        <input type="file" id="jsonInput" accept=".json,application/json" />
+      <div class="dropzone" id="jsonDropzone" tabindex="0" role="button" aria-label="Upload requirements.json">
+        <input type="file" id="jsonInput" accept=".json,application/json" style="display:none;" />
         <div class="dropzone-icon">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -142,8 +144,8 @@
         </div>
       </div>
 
-      <div class="dropzone" id="pdfDropzone">
-        <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple />
+      <div class="dropzone" id="pdfDropzone" tabindex="0" role="button" aria-label="Upload candidate PDF documents">
+        <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple style="display:none;" />
         <div class="dropzone-icon">
           <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -192,6 +194,14 @@
             </svg>
             <span id="txtExportCsv">Export CSV</span>
           </button>
+
+          <!-- Bonus Task: Test Duplicate Detection -->
+          <button id="btnTestDuplicate" class="btn-action" title="Add a duplicate file to test duplicate detection and blocking">
+            <svg style="width:16px;height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span id="txtTestDuplicate">Test Duplicate</span>
+          </button>
         </div>
       </div>
 
@@ -204,7 +214,7 @@
               <th id="thType" style="width: 110px;">Type</th>
               <th id="thAssigned" style="min-width: 200px;">Assigned File</th>
               <th id="thExpiry" style="min-width: 170px;">Expiry Date</th>
-              <th id="thStatus" style="width: 160px;">Status</th>
+              <th id="thStatus" style="width: 170px;">Status</th>
             </tr>
           </thead>
           <tbody id="checklistBody">
@@ -228,6 +238,12 @@
             <p class="card-subtitle" id="descVerification">Review blocking issues and assemble the final numbered PDF package</p>
           </div>
         </div>
+
+        <!-- Bonus Option: Table of Contents / Index page toggle -->
+        <label class="index-page-toggle" style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; cursor:pointer;">
+          <input type="checkbox" id="chkIncludeIndex" style="width:16px;height:16px;cursor:pointer;" />
+          <span id="txtIncludeIndex">Include Index / Table of Contents (Page 2)</span>
+        </label>
       </div>
 
       <!-- Blocking alert or Ready banner -->

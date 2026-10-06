@@ -1,14 +1,25 @@
 // ==============================================================================
 // Tender Document Package Builder - Main Application Logic
+// Built for AI DevFest Coding Challenge
+// Frontend-Only Architecture (HTML5, Vanilla CSS, Modern JavaScript)
 // ==============================================================================
 
 // --- Application State ---
 let currentLang = 'en'; // Active language: 'en' or 'bn'
 let tenderData = null;  // Loaded content of requirements.json
-let uploadedFiles = []; // Array of { id, name, file, bytes, hash, pageCount, isDuplicate, sizeFormatted }
+let uploadedFiles = []; // Array of { id, name, file, bytes, hash, pageCount, isDuplicate, duplicateNames, sizeFormatted, thumbUrl }
 let matches = {};       // Maps requirement ID to { fileId: string | null, expiryDate: string | null }
 
-// --- Bilingual Translation Dictionary (Task 4.9) ---
+// PDF.js worker configuration - use local worker script for offline reliability
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+}
+
+// Constraints (Section 2 & 6)
+const MAX_FILES_ALLOWED = 30;
+const MAX_TOTAL_BYTES = 50 * 1024 * 1024; // 50 MB
+
+// --- Bilingual Translation Dictionary (Task 4.9 & Section 19) ---
 const i18n = {
   en: {
     appTitle: "Tender Document Package Builder",
@@ -48,8 +59,10 @@ const i18n = {
     // Toolbar & Actions
     autoMatch: "Auto-Match Files",
     exportCsv: "Export CSV",
+    testDuplicate: "Test Duplicate",
     clearAllFiles: "Clear All Files",
     remove: "Remove",
+    includeIndex: "Include Index / Table of Contents (Page 2)",
     generate: "Generate & Download Package",
     generating: "Generating PDF Package...",
     
@@ -66,28 +79,35 @@ const i18n = {
     // Types & Badges
     mandatory: "Mandatory",
     optional: "Optional",
-    duplicateBadge: "Duplicate File (Excluded)",
+    duplicateBadge: "Duplicate Content",
+    duplicateCopy: "Duplicate copy",
+    unmatched: "Unmatched",
+    matchedTo: "Assigned to",
+    duplicateAssignedTo: "Duplicate content of",
     notApplicable: "N/A",
     
-    // Status Badges (Section 5)
+    // Exact Status Badges with Accessible Icons (Section 10)
     status: {
-      "OK": "OK",
-      "Missing": "Missing",
-      "Expiry date needed": "Expiry date needed",
-      "Expired": "Expired",
-      "Not provided": "Not provided"
+      "OK": { text: "OK", icon: "✓", class: "status-ok" },
+      "Missing": { text: "Missing", icon: "!", class: "status-missing" },
+      "Expiry date needed": { text: "Expiry date needed", icon: "!", class: "status-needed" },
+      "Expired": { text: "Expired", icon: "✕", class: "status-expired" },
+      "Not provided": { text: "Not provided", icon: "⚠", class: "status-not_provided" }
     },
     
     // Alert & Messages
     initialMsg: "Load requirements.json to begin checklist validation.",
     initialHeading: "Initial State:",
-    blockingHeading: "Cannot generate package. Resolve the following problems:",
-    readyHeading: "Ready for Package Assembly!",
-    readyMsg: "All checks passed. Package is ready to generate.",
+    blockingIntro: "Cannot generate package yet.",
+    blockingHeading: "issues need attention:",
+    readyHeading: "All required documents are ready.",
+    readyMsg: "All compliance checks passed. Click below to assemble and download final package.",
     
     // Notifications & Toasts
     notPdfError: "Rejected: Only PDF files are accepted.",
-    corruptPdfError: "Could not read PDF. File may be corrupted or password-protected.",
+    corruptPdfError: "Unable to read file. The PDF may be damaged or password protected.",
+    maxFilesExceeded: "Upload limit exceeded: Maximum 30 files allowed.",
+    maxSizeExceeded: "Upload limit exceeded: Total file size cannot exceed 50 MB.",
     autoMatchSuccess: "Auto-matched documents based on file names.",
     autoMatchNoFiles: "Please upload PDF files first before auto-matching."
   },
@@ -130,8 +150,10 @@ const i18n = {
     // Toolbar & Actions
     autoMatch: "স্বয়ংক্রিয় মেলানো",
     exportCsv: "সিএসভি এক্সপোর্ট",
+    testDuplicate: "ডুপ্লিকেট পরীক্ষা",
     clearAllFiles: "সব ফাইল মুছুন",
     remove: "মুছুন",
+    includeIndex: "সূচিপত্র / ইনডেক্স পাতা অন্তর্ভুক্ত করুন (পাতা ২)",
     generate: "প্যাকেজ তৈরি ও ডাউনলোড করুন",
     generating: "পিডিএফ প্যাকেজ তৈরি হচ্ছে...",
     
@@ -148,28 +170,35 @@ const i18n = {
     // Types & Badges
     mandatory: "আবশ্যক",
     optional: "ঐচ্ছিক",
-    duplicateBadge: "ডুপ্লিকেট ফাইল (বাতিল)",
+    duplicateBadge: "ডুপ্লিকেট ফাইল",
+    duplicateCopy: "ডুপ্লিকেট কপি",
+    unmatched: "অনির্ধারিত",
+    matchedTo: "নির্ধারিত",
+    duplicateAssignedTo: "ডুপ্লিকেট ফাইল",
     notApplicable: "প্রযোজ্য নয়",
     
-    // Status Badges (Section 5)
+    // Exact Status Badges with Accessible Icons (Section 10)
     status: {
-      "OK": "সঠিক",
-      "Missing": "অনুপস্থিত",
-      "Expiry date needed": "মেয়াদের তারিখ প্রয়োজন",
-      "Expired": "মেয়াদোত্তীর্ণ",
-      "Not provided": "দেওয়া হয়নি"
+      "OK": { text: "সঠিক", icon: "✓", class: "status-ok" },
+      "Missing": { text: "অনুপস্থিত", icon: "!", class: "status-missing" },
+      "Expiry date needed": { text: "মেয়াদের তারিখ প্রয়োজন", icon: "!", class: "status-needed" },
+      "Expired": { text: "মেয়াদোত্তীর্ণ", icon: "✕", class: "status-expired" },
+      "Not provided": { text: "দেওয়া হয়নি", icon: "⚠", class: "status-not_provided" }
     },
     
     // Alert & Messages
     initialMsg: "চেকলিস্ট যাচাই শুরু করতে requirements.json আপলোড করুন।",
     initialHeading: "প্রাথমিক অবস্থা:",
-    blockingHeading: "প্যাকেজ তৈরি করা সম্ভব নয়। নিম্নলিখিত সমস্যাগুলি সমাধান করুন:",
-    readyHeading: "প্যাকেজ তৈরির জন্য প্রস্তুত!",
-    readyMsg: "সব শর্ত সফলভাবে পূরণ হয়েছে। প্যাকেজ প্রস্তুত করা যাবে।",
+    blockingIntro: "এখনই প্যাকেজ তৈরি করা সম্ভব নয়।",
+    blockingHeading: "টি সমস্যা সমাধান করতে হবে:",
+    readyHeading: "সব প্রয়োজনীয় ডকুমেন্ট প্রস্তুত রয়েছে।",
+    readyMsg: "সব শর্ত সফলভাবে পূরণ হয়েছে। প্যাকেজ ডাউনলোড করতে নিচে ক্লিক করুন।",
     
     // Notifications & Toasts
     notPdfError: "বাতিল: শুধুমাত্র পিডিএফ ফাইল গ্রহণ করা হয়।",
     corruptPdfError: "পিডিএফ ফাইলটি পড়া যায়নি। ফাইলটি ক্ষতিগ্রস্ত অথবা পাসওয়ার্ড সংরক্ষিত হতে পারে।",
+    maxFilesExceeded: "সর্বোচ্চ ৩০টি ফাইল অনুমোদিত।",
+    maxSizeExceeded: "ফাইলের মোট আকার ৫০ মেগাবাইটের বেশি হতে পারবে না।",
     autoMatchSuccess: "ফাইলের নামের ভিত্তিতে ডকুমেন্টগুলো স্বয়ংক্রিয়ভাবে মেলানো হয়েছে।",
     autoMatchNoFiles: "স্বয়ংক্রিয় মেলানোর আগে অনুগ্রহ করে পিডিএফ ফাইল আপলোড করুন।"
   }
@@ -204,6 +233,17 @@ function formatFileSize(bytes) {
   return (kb / 1024).toFixed(2) + ' MB';
 }
 
+// --- Escape HTML Helper Utility ---
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 // --- Update Stats KPI Counters ---
 function updateStats() {
   const totalReq = tenderData ? tenderData.requirements.length : 0;
@@ -221,18 +261,64 @@ function updateStats() {
 }
 
 // ==============================================================================
+// Dropzone Events Utility (Eliminates click/drop collisions)
+// ==============================================================================
+function setupDropzoneEvents(dropzoneEl, inputEl, onFiles) {
+  if (!dropzoneEl || !inputEl) return;
+
+  dropzoneEl.addEventListener('click', (e) => {
+    if (e.target !== inputEl) {
+      inputEl.click();
+    }
+  });
+
+  dropzoneEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      inputEl.click();
+    }
+  });
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropzoneEl.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzoneEl.classList.add('dragover');
+    }, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropzoneEl.addEventListener(eventName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzoneEl.classList.remove('dragover');
+    }, false);
+  });
+
+  dropzoneEl.addEventListener('drop', (e) => {
+    const dt = e.dataTransfer;
+    const files = dt.files ? Array.from(dt.files) : [];
+    if (files.length > 0) {
+      onFiles(files);
+    }
+  }, false);
+
+  inputEl.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      onFiles(files);
+    }
+    inputEl.value = '';
+  });
+}
+
+// ==============================================================================
 // Task 4.1: Load requirements.json
 // ==============================================================================
 const jsonInput = document.getElementById('jsonInput');
 const jsonDropzone = document.getElementById('jsonDropzone');
 
-jsonInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (file) handleJsonFile(file);
-});
-
-// Drag & Drop for JSON
-setupDragAndDrop(jsonDropzone, (files) => {
+setupDropzoneEvents(jsonDropzone, jsonInput, (files) => {
   if (files.length > 0) handleJsonFile(files[0]);
 });
 
@@ -243,6 +329,10 @@ async function handleJsonFile(file) {
 
     if (!data.tender || !Array.isArray(data.requirements)) {
       throw new Error("Invalid format: 'tender' or 'requirements' missing.");
+    }
+
+    if (!data.tender.tender_id || !data.tender.submission_deadline) {
+      throw new Error("Invalid tender object: 'tender_id' and 'submission_deadline' are required.");
     }
 
     // Sort requirements strictly ascending by order (Task 4.1)
@@ -259,7 +349,7 @@ async function handleJsonFile(file) {
     renderChecklist();
     evaluateStatus();
     updateStats();
-    showToast(`Loaded ${tenderData.requirements.length} requirements successfully!`, 'success');
+    showToast(`Loaded tender "${data.tender.tender_id}" with ${data.requirements.length} requirements!`, 'success');
   } catch (err) {
     alert("Invalid JSON format! Please check the requirements.json file: " + err.message);
   }
@@ -306,27 +396,35 @@ function renderTenderMeta() {
 const pdfInput = document.getElementById('pdfInput');
 const pdfDropzone = document.getElementById('pdfDropzone');
 
-pdfInput.addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files);
-  await handlePdfUploads(files);
-  e.target.value = '';
-});
-
-// Drag & Drop for PDFs
-setupDragAndDrop(pdfDropzone, async (files) => {
+setupDropzoneEvents(pdfDropzone, pdfInput, async (files) => {
   await handlePdfUploads(files);
 });
 
 async function handlePdfUploads(files) {
+  // Check maximum file limits (Section 2 & 6)
+  if (uploadedFiles.length + files.length > MAX_FILES_ALLOWED) {
+    const msg = i18n[currentLang].maxFilesExceeded;
+    showToast(msg, 'error');
+    alert(msg);
+    return;
+  }
+
+  const currentTotalBytes = uploadedFiles.reduce((acc, f) => acc + (f.bytes ? f.bytes.byteLength : 0), 0);
+  const newTotalBytes = files.reduce((acc, f) => acc + f.size, 0);
+  if (currentTotalBytes + newTotalBytes > MAX_TOTAL_BYTES) {
+    const msg = i18n[currentLang].maxSizeExceeded;
+    showToast(msg, 'error');
+    alert(msg);
+    return;
+  }
+
   let accepted = 0;
-  let rejected = 0;
 
   for (const file of files) {
     // Reject non-PDF files with clear message (Task 4.2)
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
-      rejected++;
-      const msg = `Rejected: "${file.name}" is not a PDF.`;
+      const msg = `Rejected: "${file.name}" is not a PDF file.`;
       showToast(msg, 'error');
       alert(msg);
       continue;
@@ -346,20 +444,46 @@ async function handlePdfUploads(files) {
         const pdfDoc = await PDFLib.PDFDocument.load(buffer, { ignoreEncryption: true });
         pageCount = pdfDoc.getPageCount();
       } catch (err) {
-        showToast(`Could not parse "${file.name}": Corrupted or encrypted PDF.`, 'error');
-        alert(`Could not parse "${file.name}". File might be corrupted or password-protected.`);
+        showToast(`Unable to read "${file.name}". The PDF may be damaged or password protected. Please choose another PDF.`, 'error');
+        alert(`Unable to read "${file.name}". The PDF may be damaged or password protected. Please choose another PDF.`);
         continue;
+      }
+
+      // Generate first-page thumbnail using PDF.js if available
+      // CRITICAL: Clone the buffer slice so PDF.js worker doesn't detach the original ArrayBuffer!
+      let thumbUrl = null;
+      if (window.pdfjsLib) {
+        try {
+          const thumbBytes = new Uint8Array(buffer.slice(0));
+          const loadingTask = window.pdfjsLib.getDocument({ data: thumbBytes });
+          const pdf = await loadingTask.promise;
+          const page = await pdf.getPage(1);
+          const viewport = page.getViewport({ scale: 0.25 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const renderContext = {
+            canvasContext: canvas.getContext('2d'),
+            viewport: viewport
+          };
+          await page.render(renderContext).promise;
+          thumbUrl = canvas.toDataURL();
+        } catch (e) {
+          thumbUrl = null;
+        }
       }
 
       uploadedFiles.push({
         id: 'file_' + Math.random().toString(36).substring(2, 9),
         name: file.name,
         file: file,
-        bytes: buffer,
+        bytes: buffer, // Original intact ArrayBuffer
         hash: hashHex,
         pageCount: pageCount,
         isDuplicate: false,
-        sizeFormatted: formatFileSize(file.size)
+        duplicateNames: [],
+        sizeFormatted: formatFileSize(file.size),
+        thumbUrl: thumbUrl
       });
       accepted++;
     } catch (err) {
@@ -376,27 +500,44 @@ async function handlePdfUploads(files) {
   }
 }
 
-// Re-evaluate duplicates whenever files are added or removed (Task 4.6)
+// Re-evaluate duplicates whenever files are added or removed (Task 4.6 & Section 8)
 function recalculateDuplicates() {
   const hashCounts = {};
+  const hashNames = {};
+
   uploadedFiles.forEach(f => {
     hashCounts[f.hash] = (hashCounts[f.hash] || 0) + 1;
+    if (!hashNames[f.hash]) hashNames[f.hash] = [];
+    hashNames[f.hash].push(f.name);
   });
 
   uploadedFiles.forEach(f => {
-    const wasDuplicate = f.isDuplicate;
     f.isDuplicate = hashCounts[f.hash] > 1;
-
-    // Rule 4.6: If a file is marked duplicate, do NOT allow matching to any document.
-    // If it was previously matched, unbind it immediately.
-    if (f.isDuplicate) {
-      Object.keys(matches).forEach(reqId => {
-        if (matches[reqId].fileId === f.id) {
-          matches[reqId].fileId = null;
-        }
-      });
-    }
+    f.duplicateNames = (hashNames[f.hash] || []).filter(name => name !== f.name);
   });
+
+  // Strict Rule Section 8:
+  // "Do not allow duplicate copies of the same content to be assigned to different requirements."
+  // If multiple requirements were assigned files sharing the same content hash:
+  // Keep the match on the first requirement, unbind any other requirement.
+  if (tenderData) {
+    const claimedHashes = new Map(); // hash -> reqId
+    tenderData.requirements.forEach(req => {
+      const match = matches[req.id];
+      if (match?.fileId) {
+        const fileObj = uploadedFiles.find(f => f.id === match.fileId);
+        if (fileObj) {
+          if (claimedHashes.has(fileObj.hash)) {
+            // Already claimed by another requirement! Unbind this duplicate
+            match.fileId = null;
+            match.expiryDate = '';
+          } else {
+            claimedHashes.set(fileObj.hash, req.id);
+          }
+        }
+      }
+    });
+  }
 }
 
 function removeFile(fileId) {
@@ -406,6 +547,7 @@ function removeFile(fileId) {
   Object.keys(matches).forEach(reqId => {
     if (matches[reqId].fileId === fileId) {
       matches[reqId].fileId = null;
+      matches[reqId].expiryDate = '';
     }
   });
 
@@ -422,6 +564,7 @@ function clearAllFiles() {
   uploadedFiles = [];
   Object.keys(matches).forEach(reqId => {
     matches[reqId].fileId = null;
+    matches[reqId].expiryDate = '';
   });
   renderFileList();
   renderChecklist();
@@ -448,36 +591,72 @@ function renderFileList() {
     ? `আপলোডকৃত: ${uploadedFiles.length}টি ফাইল (মোট ${totalPages} পৃষ্ঠা)`
     : `Uploaded: ${uploadedFiles.length} files (total ${totalPages} pages)`;
 
-  container.innerHTML = uploadedFiles.map(f => `
-    <div class="file-card ${f.isDuplicate ? 'duplicate' : ''}">
-      <div class="file-main">
-        <div class="file-icon">
-          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-          </svg>
-        </div>
-        <div class="file-details">
-          <div class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
-          <div class="file-meta">
-            <span>📄 ${f.pageCount} ${currentLang === 'bn' ? 'পৃষ্ঠা' : 'pgs'}</span>
-            <span>•</span>
-            <span>${f.sizeFormatted}</span>
-            ${f.isDuplicate ? `<span class="file-badge-duplicate">${i18n[currentLang].duplicateBadge}</span>` : ''}
+  // Find match for each file
+  const fileToReqMap = {};
+  const hashToReqMap = {};
+  if (tenderData) {
+    tenderData.requirements.forEach(req => {
+      if (matches[req.id]?.fileId) {
+        const assignedFile = uploadedFiles.find(f => f.id === matches[req.id].fileId);
+        const reqTitle = currentLang === 'bn' ? (req.title_bn || req.title_en) : req.title_en;
+        fileToReqMap[matches[req.id].fileId] = reqTitle;
+        if (assignedFile) hashToReqMap[assignedFile.hash] = reqTitle;
+      }
+    });
+  }
+
+  container.innerHTML = uploadedFiles.map(f => {
+    const assignedReqTitle = fileToReqMap[f.id];
+    const duplicateAssignedTitle = !assignedReqTitle && f.isDuplicate ? hashToReqMap[f.hash] : null;
+
+    return `
+      <div class="file-card ${f.isDuplicate ? 'duplicate' : ''}">
+        <div class="file-main">
+          ${f.thumbUrl ? `
+            <img class="file-thumb-canvas" src="${f.thumbUrl}" alt="Thumbnail" />
+          ` : `
+            <div class="file-icon">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+            </div>
+          `}
+          <div class="file-details">
+            <div class="file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+            <div class="file-meta">
+              <span>📄 ${f.pageCount} ${currentLang === 'bn' ? 'পৃষ্ঠা' : 'pgs'}</span>
+              <span>•</span>
+              <span>${f.sizeFormatted}</span>
+              ${f.isDuplicate ? `
+                <span class="file-badge-duplicate" title="Same content as: ${escapeHtml(f.duplicateNames.join(', '))}">
+                  ⚠ ${i18n[currentLang].duplicateBadge} (${escapeHtml(f.duplicateNames[0] || '')})
+                </span>
+              ` : ''}
+              ${assignedReqTitle ? `
+                <span class="file-match-tag matched">✓ ${i18n[currentLang].matchedTo}: ${escapeHtml(assignedReqTitle)}</span>
+              ` : duplicateAssignedTitle ? `
+                <span class="file-match-tag unmatched" style="color:var(--status-expired-text);">
+                  ⚠ ${i18n[currentLang].duplicateAssignedTo}: ${escapeHtml(duplicateAssignedTitle)}
+                </span>
+              ` : `
+                <span class="file-match-tag unmatched">${i18n[currentLang].unmatched}</span>
+              `}
+            </div>
           </div>
         </div>
+        <button class="btn-remove" onclick="removeFile('${f.id}')" title="Remove file">
+          <svg style="width:13px;height:13px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          <span>${i18n[currentLang].remove}</span>
+        </button>
       </div>
-      <button class="btn-remove" onclick="removeFile('${f.id}')">
-        <svg style="width:13px;height:13px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-        <span>${i18n[currentLang].remove}</span>
-      </button>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // ==============================================================================
-// Tasks 4.3, 4.4, 4.5: Checklist Table & 1-to-1 File Matching
+// Tasks 4.3, 4.4, 4.5 & Section 7, 8: Checklist Table & 1-to-1 Matching
 // ==============================================================================
 function renderChecklist() {
   const tbody = document.getElementById('checklistBody');
@@ -499,20 +678,40 @@ function renderChecklist() {
     Object.values(matches).map(m => m.fileId).filter(Boolean)
   );
 
+  // Map each requirement to the content hash of its currently assigned file (Section 8)
+  const reqAssignedHashMap = {};
+  tenderData.requirements.forEach(r => {
+    const fId = matches[r.id]?.fileId;
+    if (fId) {
+      const f = uploadedFiles.find(x => x.id === fId);
+      if (f) reqAssignedHashMap[r.id] = f.hash;
+    }
+  });
+
   tbody.innerHTML = tenderData.requirements.map(req => {
     // Show title according to active language (Task 4.9)
     const title = currentLang === 'bn' ? (req.title_bn || req.title_en) : req.title_en;
     const subtitle = currentLang === 'bn' && req.title_bn ? req.title_en : '';
     const match = matches[req.id] || { fileId: null, expiryDate: '' };
 
-    // Filter available files: must NOT be duplicates, and either unassigned OR assigned to this doc
+    // Hashes already claimed by other requirements
+    const otherReqHashes = new Set(
+      Object.entries(reqAssignedHashMap)
+        .filter(([rId]) => rId !== req.id)
+        .map(([, h]) => h)
+    );
+
+    // Filter available files for this requirement:
+    // 1. Must NOT be assigned to another requirement (assignedFileIds)
+    // 2. Content hash must NOT be assigned to another requirement (Section 8 duplicate rule)
     const availableFiles = uploadedFiles.filter(f =>
-      !f.isDuplicate && (!assignedFileIds.has(f.id) || match.fileId === f.id)
+      (!assignedFileIds.has(f.id) || match.fileId === f.id) &&
+      (!otherReqHashes.has(f.hash) || (match.fileId && f.hash === reqAssignedHashMap[req.id]))
     );
 
     const fileOptions = availableFiles.map(f => `
       <option value="${f.id}" ${match.fileId === f.id ? 'selected' : ''}>
-        ${escapeHtml(f.name)} (${f.pageCount} ${currentLang === 'bn' ? 'পৃষ্ঠা' : 'pgs'})
+        ${escapeHtml(f.name)} (${f.pageCount} ${currentLang === 'bn' ? 'পৃষ্ঠা' : 'pgs'})${f.isDuplicate ? ` [${i18n[currentLang].duplicateCopy}]` : ''}
       </option>
     `).join('');
 
@@ -554,49 +753,84 @@ function renderChecklist() {
   }).join('');
 }
 
-// Global match update handler (Task 4.3)
+// Global match update handler (Task 4.3 & Section 7, 8)
 window.updateMatch = function (reqId, fileId) {
+  if (!matches[reqId]) matches[reqId] = { fileId: null, expiryDate: '' };
+
+  if (fileId) {
+    const chosenFile = uploadedFiles.find(f => f.id === fileId);
+    if (chosenFile) {
+      // Check if another requirement already has a file with the identical hash
+      const conflictReq = tenderData?.requirements.find(r => {
+        if (r.id === reqId) return false;
+        const otherFile = uploadedFiles.find(f => f.id === matches[r.id]?.fileId);
+        return otherFile && otherFile.hash === chosenFile.hash;
+      });
+
+      if (conflictReq) {
+        const conflictTitle = currentLang === 'bn' ? (conflictReq.title_bn || conflictReq.title_en) : conflictReq.title_en;
+        const msg = currentLang === 'bn'
+          ? `এই ফাইলের বিষয়বস্তু ইতিমধ্যেই "${conflictTitle}" এর জন্য নির্ধারিত ফাইলের সাথে অভিন্ন। ডুপ্লিকেট ফাইল ভিন্ন ডকুমেন্টে ব্যবহার করা যাবে না।`
+          : `This file has identical content to the file already assigned to "${conflictTitle}". Duplicate files cannot satisfy different requirements.`;
+        showToast(msg, 'error');
+        alert(msg);
+        renderChecklist();
+        return;
+      }
+    }
+  }
+
   matches[reqId].fileId = fileId || null;
   if (!fileId) {
     matches[reqId].expiryDate = '';
   }
+
+  recalculateDuplicates();
   renderChecklist();
+  renderFileList();
   evaluateStatus();
   updateStats();
 };
 
-// Global expiry date handler (Task 4.4)
+// Global expiry date handler (Task 4.4 & Section 9)
 window.updateExpiry = function (reqId, dateValue) {
+  if (!matches[reqId]) matches[reqId] = { fileId: null, expiryDate: '' };
   matches[reqId].expiryDate = dateValue;
   evaluateStatus();
   updateStats();
 };
 
 // ==============================================================================
-// Section 5: Status Calculation Rules
+// Section 5, 9, 10: Status Calculation Rules
 // ==============================================================================
 function getDocStatus(req, match, deadline) {
   // Rule 1: No file attached
   if (!match || !match.fileId) {
     return req.mandatory
-      ? { text: "Missing", blocking: true, class: "status-missing" }
-      : { text: "Not provided", blocking: false, class: "status-not_provided" };
+      ? { key: "Missing", blocking: true }
+      : { key: "Not provided", blocking: false };
   }
 
-  // Rule 2: Expiry date evaluation
+  // Rule 2: Expiry date evaluation (Section 9)
   if (req.has_expiry) {
-    if (!match.expiryDate) {
-      return { text: "Expiry date needed", blocking: true, class: "status-needed" };
+    if (!match.expiryDate || !match.expiryDate.trim()) {
+      return { key: "Expiry date needed", blocking: true };
     }
-    // "YYYY-MM-DD" string comparison: strictly before deadline means expired
-    // If expiryDate is equal to deadline, it is NOT expired (OK)
-    if (match.expiryDate < deadline) {
-      return { text: "Expired", blocking: true, class: "status-expired" };
+    
+    // Normalize date strings to "YYYY-MM-DD"
+    const normExpiry = match.expiryDate.trim().substring(0, 10);
+    const normDeadline = (deadline || '').trim().substring(0, 10);
+
+    // Section 9 rule:
+    // expiry date < submission deadline -> Expired (blocking)
+    // expiry date >= submission deadline -> OK (expiring on deadline is valid)
+    if (normExpiry < normDeadline) {
+      return { key: "Expired", blocking: true };
     }
   }
 
   // Rule 3: Valid document
-  return { text: "OK", blocking: false, class: "status-ok" };
+  return { key: "OK", blocking: false };
 }
 
 function evaluateStatus() {
@@ -604,8 +838,8 @@ function evaluateStatus() {
     const alertBox = document.getElementById('blockingAlert');
     alertBox.className = 'alert-box';
     alertBox.innerHTML = `
-      <strong>${i18n[currentLang].initialHeading}</strong>
-      <span>${i18n[currentLang].initialMsg}</span>
+      <strong id="alertHeading">${i18n[currentLang].initialHeading}</strong>
+      <span id="alertMsg">${i18n[currentLang].initialMsg}</span>
     `;
     const generateBtn = document.getElementById('generateBtn');
     if (generateBtn) generateBtn.disabled = true;
@@ -619,14 +853,15 @@ function evaluateStatus() {
   tenderData.requirements.forEach(req => {
     const match = matches[req.id];
     const statusResult = getDocStatus(req, match, deadline);
+    const statusInfo = i18n[currentLang].status[statusResult.key];
 
-    // Update status badge cell in the table
+    // Update status badge cell in the table (Section 10 icons & accessible styling)
     const statusCell = document.getElementById(`status_${req.id}`);
     if (statusCell) {
       statusCell.innerHTML = `
-        <span class="status-pill ${statusResult.class}">
-          <span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor;"></span>
-          ${i18n[currentLang].status[statusResult.text]}
+        <span class="status-pill ${statusInfo.class}">
+          <span class="status-icon">${statusInfo.icon}</span>
+          <span>${statusInfo.text}</span>
         </span>
       `;
     }
@@ -636,7 +871,7 @@ function evaluateStatus() {
       const title = currentLang === 'bn' ? (req.title_bn || req.title_en) : req.title_en;
       blockingReasons.push({
         title,
-        statusText: i18n[currentLang].status[statusResult.text]
+        statusText: statusInfo.text
       });
     }
   });
@@ -653,10 +888,13 @@ function evaluateStatus() {
         <svg style="width:18px;height:18px;flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
-        ${i18n[currentLang].blockingHeading}
+        ${i18n[currentLang].blockingIntro}
       </strong>
+      <p style="margin-top: 4px; font-weight: 600;">
+        ${blockingReasons.length} ${i18n[currentLang].blockingHeading}
+      </p>
       <ul>
-        ${blockingReasons.map(r => `<li><strong>${escapeHtml(r.title)}:</strong> ${escapeHtml(r.statusText)}</li>`).join('')}
+        ${blockingReasons.map(r => `<li><strong>${escapeHtml(r.title)}</strong> — ${escapeHtml(r.statusText)}</li>`).join('')}
       </ul>
     `;
     if (pkgSummary) pkgSummary.textContent = '';
@@ -674,16 +912,17 @@ function evaluateStatus() {
     `;
 
     // Calculate total pages for preview
+    const includeIndex = document.getElementById('chkIncludeIndex')?.checked ?? false;
     const included = tenderData.requirements
       .map(r => matches[r.id]?.fileId ? uploadedFiles.find(f => f.id === matches[r.id].fileId) : null)
       .filter(Boolean);
     const docPages = included.reduce((sum, f) => sum + f.pageCount, 0);
-    const totalPages = 1 + docPages; // 1 cover page + document pages
+    const totalPages = (includeIndex ? 2 : 1) + docPages; // Cover (+ Index) + docs
 
     if (pkgSummary) {
       pkgSummary.textContent = currentLang === 'bn'
-        ? `অন্তর্ভুক্ত ডকুমেন্ট: ${included.length}টি | চূড়ান্ত প্যাকেজের পৃষ্ঠা: ${totalPages}টি (কভার সহ)`
-        : `Included Documents: ${included.length} | Package Total: ${totalPages} pages (incl. Cover)`;
+        ? `অন্তর্ভুক্ত ডকুমেন্ট: ${included.length}টি | চূড়ান্ত প্যাকেজ: ${totalPages} পৃষ্ঠা (কভার ${includeIndex ? '+ সূচিপত্র ' : ''}সহ)`
+        : `Included Documents: ${included.length} | Final Package: ${totalPages} pages (incl. Cover${includeIndex ? ' + Index' : ''})`;
     }
   }
 }
@@ -730,10 +969,12 @@ function switchLanguage(lang) {
   document.getElementById('txtPdfDropTitle').textContent = dict.pdfDropTitle;
   document.getElementById('txtPdfDropDesc').textContent = dict.pdfDropDesc;
 
-  // Toolbar
+  // Toolbar & Options
   document.getElementById('txtAutoMatch').textContent = dict.autoMatch;
   document.getElementById('txtExportCsv').textContent = dict.exportCsv;
+  if (document.getElementById('txtTestDuplicate')) document.getElementById('txtTestDuplicate').textContent = dict.testDuplicate;
   document.getElementById('txtClearAllFiles').textContent = dict.clearAllFiles;
+  document.getElementById('txtIncludeIndex').textContent = dict.includeIndex;
   document.getElementById('txtGenerateBtn').textContent = dict.generate;
 
   // Table headers
@@ -753,7 +994,7 @@ function switchLanguage(lang) {
 }
 
 // ==============================================================================
-// Bonus Task 7: Auto-Match Files by Name
+// Bonus Task 7.F: Auto-Match Files by Name
 // ==============================================================================
 document.getElementById('btnAutoMatch')?.addEventListener('click', () => {
   if (!tenderData || !tenderData.requirements.length) {
@@ -765,46 +1006,68 @@ document.getElementById('btnAutoMatch')?.addEventListener('click', () => {
     return;
   }
 
-  // Exclude duplicate files
-  const validFiles = uploadedFiles.filter(f => !f.isDuplicate);
-  const assigned = new Set();
-  let matchedCount = 0;
+  const assignedFileIds = new Set();
+  const assignedHashes = new Set();
 
-  // Helper to normalize strings for comparison
-  const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // Try matching each requirement in order
   tenderData.requirements.forEach(req => {
-    // Skip if already has valid assigned file
-    if (matches[req.id]?.fileId) {
-      assigned.add(matches[req.id].fileId);
-      return;
-    }
-
-    const titleEn = normalize(req.title_en);
-    const keywords = titleEn.split(' ').filter(w => w.length > 2);
-
-    // Find best match among unassigned valid files
-    for (const f of validFiles) {
-      if (assigned.has(f.id)) continue;
-
-      const fileName = normalize(f.name.replace(/\.pdf$/i, ''));
-      
-      // Direct substring match or keyword intersection
-      const isMatch = fileName.includes(titleEn) || 
-                      titleEn.includes(fileName) ||
-                      keywords.every(kw => fileName.includes(kw));
-
-      if (isMatch) {
-        matches[req.id].fileId = f.id;
-        assigned.add(f.id);
-        matchedCount++;
-        break;
-      }
+    const fId = matches[req.id]?.fileId;
+    if (fId) {
+      assignedFileIds.add(fId);
+      const fObj = uploadedFiles.find(f => f.id === fId);
+      if (fObj) assignedHashes.add(fObj.hash);
     }
   });
 
+  const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const stopWords = new Set(['certificate', 'registration', 'proposal', 'letter', 'document', 'and', 'the', 'for', 'past', 'copy', 'cert']);
+
+  let matchedCount = 0;
+
+  tenderData.requirements.forEach(req => {
+    if (matches[req.id]?.fileId) return; // Skip already matched requirement
+
+    const titleEn = normalize(req.title_en);
+    const titleBn = normalize(req.title_bn);
+    const keywords = titleEn.split(' ').filter(w => w.length > 2 && !stopWords.has(w));
+
+    let bestFile = null;
+    let highestScore = 0;
+
+    for (const f of uploadedFiles) {
+      if (assignedFileIds.has(f.id)) continue;
+      if (assignedHashes.has(f.hash)) continue; // Never assign duplicate content to another requirement!
+
+      const fileName = normalize(f.name.replace(/\.pdf$/i, ''));
+      let score = 0;
+
+      if (fileName === titleEn || (titleBn && fileName === titleBn)) {
+        score = 100;
+      } else if (fileName.includes(titleEn) || titleEn.includes(fileName)) {
+        score = 80;
+      } else if (titleBn && (fileName.includes(titleBn) || titleBn.includes(fileName))) {
+        score = 80;
+      } else if (keywords.length > 0 && keywords.some(kw => fileName.includes(kw))) {
+        const matchCount = keywords.filter(kw => fileName.includes(kw)).length;
+        score = 50 + matchCount * 10;
+      }
+
+      if (score > highestScore) {
+        highestScore = score;
+        bestFile = f;
+      }
+    }
+
+    if (bestFile && highestScore >= 50) {
+      matches[req.id].fileId = bestFile.id;
+      assignedFileIds.add(bestFile.id);
+      assignedHashes.add(bestFile.hash);
+      matchedCount++;
+    }
+  });
+
+  recalculateDuplicates();
   renderChecklist();
+  renderFileList();
   evaluateStatus();
   updateStats();
   showToast(currentLang === 'bn' 
@@ -813,7 +1076,7 @@ document.getElementById('btnAutoMatch')?.addEventListener('click', () => {
 });
 
 // ==============================================================================
-// Bonus Task 7: Export Checklist as CSV
+// Bonus Task 7.C: Export Checklist as CSV
 // ==============================================================================
 document.getElementById('btnExportCsv')?.addEventListener('click', () => {
   if (!tenderData) {
@@ -829,31 +1092,35 @@ document.getElementById('btnExportCsv')?.addEventListener('click', () => {
     const match = matches[req.id];
     const fileObj = match?.fileId ? uploadedFiles.find(f => f.id === match.fileId) : null;
     const statusResult = getDocStatus(req, match, tenderData.tender.submission_deadline);
+    const title = currentLang === 'bn' ? (req.title_bn || req.title_en) : req.title_en;
 
     rows.push([
       req.order,
-      `"${(req.title_en || '').replace(/"/g, '""')}"`,
-      req.mandatory ? "Yes" : "No",
-      fileObj ? `"${fileObj.name.replace(/"/g, '""')}"` : "None",
+      `"${(title || '').replace(/"/g, '""')}"`,
+      req.mandatory ? (currentLang === 'bn' ? "আবশ্যক" : "Yes") : (currentLang === 'bn' ? "ঐচ্ছিক" : "No"),
+      fileObj ? `"${fileObj.name.replace(/"/g, '""')}"` : (currentLang === 'bn' ? "নেই" : "None"),
       fileObj ? fileObj.pageCount : 0,
-      match?.expiryDate || "N/A",
-      statusResult.text
+      match?.expiryDate || (currentLang === 'bn' ? "প্রযোজ্য নয়" : "N/A"),
+      i18n[currentLang].status[statusResult.key].text
     ]);
   });
 
-  const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
-  const encodedUri = encodeURI(csvContent);
+  // UTF-8 BOM prefix for Microsoft Excel compatibility
+  const csvContent = "\uFEFF" + rows.map(e => e.join(",")).join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
-  link.setAttribute("href", encodedUri);
-  link.setAttribute("download", `Checklist_${tenderData.tender.tender_id}.csv`);
+  link.href = url;
+  link.download = `Checklist_${tenderData.tender.tender_id}.csv`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
   showToast("Checklist CSV exported!", "success");
 });
 
 // ==============================================================================
-// Quick Demo Pack Loader
+// Quick Demo Pack Loader (Instant in-memory generation)
 // ==============================================================================
 document.getElementById('btnLoadDemo')?.addEventListener('click', async () => {
   const demoRequirements = {
@@ -895,29 +1162,19 @@ document.getElementById('btnLoadDemo')?.addEventListener('click', async () => {
       { name: "bank_solvency.pdf", pages: 2, title: "Bank Solvency Certificate" },
       { name: "experience_cert.pdf", pages: 1, title: "Past Experience Certificate" },
       { name: "technical_proposal.pdf", pages: 3, title: "Technical Proposal" },
-      { name: "financial_proposal.pdf", pages: 2, title: "Financial Proposal" },
-      { name: "duplicate_trade_license.pdf", pages: 1, title: "Trade License Copy", duplicateOf: 0 }
+      { name: "financial_proposal.pdf", pages: 2, title: "Financial Proposal" }
     ];
-
-    const generatedBuffers = [];
 
     for (let i = 0; i < demoDocSpecs.length; i++) {
       const spec = demoDocSpecs[i];
-      let buffer;
-
-      if (spec.duplicateOf !== undefined) {
-        // Exact duplicate bytes to demonstrate Task 4.6
-        buffer = generatedBuffers[spec.duplicateOf];
-      } else {
-        const doc = await PDFDocument.create();
-        for (let p = 0; p < spec.pages; p++) {
-          const page = doc.addPage([595.28, 841.89]);
-          page.drawText(`${spec.title} - Page ${p + 1}`, { x: 50, y: 750, size: 16 });
-        }
-        const bytes = await doc.save();
-        buffer = bytes.buffer;
-        generatedBuffers.push(buffer);
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(PDFLib.StandardFonts.Helvetica);
+      for (let p = 0; p < spec.pages; p++) {
+        const page = doc.addPage([595.28, 841.89]);
+        page.drawText(`${spec.title} - Official Copy (Page ${p + 1} of ${spec.pages})`, { x: 50, y: 760, size: 14, font });
       }
+      const bytes = await doc.save();
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
       // Compute hash
       const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -932,7 +1189,9 @@ document.getElementById('btnLoadDemo')?.addEventListener('click', async () => {
         hash: hashHex,
         pageCount: spec.pages,
         isDuplicate: false,
-        sizeFormatted: formatFileSize(buffer.byteLength)
+        duplicateNames: [],
+        sizeFormatted: formatFileSize(buffer.byteLength),
+        thumbUrl: null
       });
     }
 
@@ -941,20 +1200,57 @@ document.getElementById('btnLoadDemo')?.addEventListener('click', async () => {
     renderFileList();
     renderChecklist();
 
-    // Auto match non-duplicate files
+    // Auto match files
     document.getElementById('btnAutoMatch')?.click();
 
-    // Set demo valid expiry dates for demonstration (>= 2026-10-20)
+    // Set demo valid expiry dates (>= submission_deadline 2026-10-20)
     if (matches['R01']) matches['R01'].expiryDate = '2026-12-31';
     if (matches['R04']) matches['R04'].expiryDate = '2026-11-15';
 
     renderChecklist();
+    renderFileList();
     evaluateStatus();
     updateStats();
-    showToast("Demo pack loaded with test PDFs and duplicate detection!", "success");
+    showToast(currentLang === 'bn' 
+      ? "ডেমো ডাটা সফলভাবে লোড হয়েছে! সব ডকুমেন্ট প্রস্তুত।" 
+      : "Demo data loaded successfully! All documents are ready.", "success");
   } catch (err) {
     showToast("Error loading demo: " + err.message, "error");
   }
+});
+
+// Test Duplicate Detection Handler
+document.getElementById('btnTestDuplicate')?.addEventListener('click', async () => {
+  if (uploadedFiles.length === 0) {
+    showToast("Please load demo data or upload PDFs first.", "error");
+    return;
+  }
+
+  // Duplicate the first file
+  const orig = uploadedFiles[0];
+  const duplicateFile = {
+    id: 'file_dup_' + Math.random().toString(36).substring(2, 9),
+    name: 'duplicate_' + orig.name,
+    file: orig.file,
+    bytes: orig.bytes.slice(0),
+    hash: orig.hash, // Identical content hash
+    pageCount: orig.pageCount,
+    isDuplicate: true,
+    duplicateNames: [orig.name],
+    sizeFormatted: orig.sizeFormatted,
+    thumbUrl: orig.thumbUrl
+  };
+
+  uploadedFiles.push(duplicateFile);
+  recalculateDuplicates();
+  renderFileList();
+  renderChecklist();
+  evaluateStatus();
+  updateStats();
+
+  showToast(currentLang === 'bn'
+    ? `ডুপ্লিকেট ফাইল যোগ করা হয়েছে (${duplicateFile.name})। ডুপ্লিকেট সনাক্ত করা হয়েছে!`
+    : `Duplicate file added (${duplicateFile.name}). Duplicate content detected and cross-matching prevented!`, "error");
 });
 
 // Reset Button
@@ -972,7 +1268,7 @@ document.getElementById('btnReset')?.addEventListener('click', () => {
 });
 
 // ==============================================================================
-// Tasks 4.7, 4.8 & Section 6: Package Assembly & Download
+// Tasks 4.7, 4.8 & Section 12-15: Package Assembly & Download
 // ==============================================================================
 document.getElementById('generateBtn').addEventListener('click', async () => {
   const generateBtn = document.getElementById('generateBtn');
@@ -992,8 +1288,9 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
     const boldFont = await mergedPdf.embedFont(StandardFonts.HelveticaBold);
 
     const tender = tenderData.tender;
+    const includeIndex = document.getElementById('chkIncludeIndex')?.checked ?? false;
 
-    // Collect included documents in sorted order, skipping unprovided optional docs (Rule 6.2)
+    // Collect included documents in sorted order, skipping unprovided optional docs (Section 14)
     const includedDocs = [];
     for (const req of tenderData.requirements) {
       const match = matches[req.id];
@@ -1005,7 +1302,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       }
     }
 
-    // --- RULE 6.1: Page 1 Cover Page (in English) ---
+    // --- RULE 6.1 / Section 13: Page 1 Cover Page (in English) ---
     const coverPage = mergedPdf.addPage([595.28, 841.89]); // Standard A4 portrait
     let yPos = 780;
 
@@ -1027,12 +1324,12 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
     });
 
     const metadata = [
-      ["Tender ID:", tender.tender_id],
-      ["Tender Title:", tender.title],
-      ["Procuring Entity:", tender.procuring_entity],
-      ["Bidder:", tender.bidder],
-      ["Submission Deadline:", tender.submission_deadline],
-      ["Date Generated:", new Date().toISOString().split('T')[0]]
+      ["Tender ID:", tender.tender_id || "N/A"],
+      ["Tender Title:", tender.title || "N/A"],
+      ["Procuring Entity:", tender.procuring_entity || "N/A"],
+      ["Bidder:", tender.bidder || "N/A"],
+      ["Submission Deadline:", tender.submission_deadline || "N/A"],
+      ["Package Created:", new Date().toISOString().split('T')[0]]
     ];
 
     metadata.forEach(([label, value]) => {
@@ -1042,28 +1339,68 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
     });
 
     yPos -= 16;
-    coverPage.drawText("List of Included Documents:", {
+    coverPage.drawText("INCLUDED DOCUMENTS", {
       x: 50,
       y: yPos,
-      size: 12,
+      size: 13,
       font: boldFont,
-      color: rgb(0.1, 0.1, 0.1)
+      color: rgb(0.08, 0.15, 0.3)
     });
     yPos -= 22;
+
+    const itemFontSize = includedDocs.length > 16 ? 8 : 9.5;
+    const itemLineSpacing = includedDocs.length > 16 ? 14 : 18;
 
     includedDocs.forEach((item, index) => {
       const lineText = `${index + 1}. [Order ${item.req.order}] ${item.req.title_en} (${item.fileObj.name} - ${item.fileObj.pageCount} pgs)`;
       coverPage.drawText(lineText, {
         x: 60,
         y: yPos,
-        size: 9.5,
+        size: itemFontSize,
         font: font,
         color: rgb(0.2, 0.2, 0.2)
       });
-      yPos -= 18;
+      yPos -= itemLineSpacing;
     });
 
-    // --- RULE 6.2: Append Document Pages in Original Order ---
+    // --- Bonus Task 7.A: Index Page (Table of Contents) ---
+    if (includeIndex) {
+      const indexPage = mergedPdf.addPage([595.28, 841.89]);
+      let idxY = 780;
+
+      indexPage.drawText("DOCUMENT INDEX / TABLE OF CONTENTS", {
+        x: 50,
+        y: idxY,
+        size: 16,
+        font: boldFont,
+        color: rgb(0.08, 0.15, 0.3)
+      });
+      idxY -= 20;
+
+      indexPage.drawLine({
+        start: { x: 50, y: idxY },
+        end: { x: 545, y: idxY },
+        thickness: 1,
+        color: rgb(0.3, 0.5, 0.8)
+      });
+      idxY -= 30;
+
+      indexPage.drawText("Document", { x: 50, y: idxY, size: 11, font: boldFont });
+      indexPage.drawText("Pages", { x: 380, y: idxY, size: 11, font: boldFont });
+      indexPage.drawText("Starts on Page", { x: 450, y: idxY, size: 11, font: boldFont });
+      idxY -= 18;
+
+      let currentStartPage = 3; // Page 1 = Cover, Page 2 = Index
+      includedDocs.forEach((item, index) => {
+        indexPage.drawText(`${index + 1}. ${item.req.title_en}`, { x: 50, y: idxY, size: 10, font });
+        indexPage.drawText(`${item.fileObj.pageCount}`, { x: 390, y: idxY, size: 10, font });
+        indexPage.drawText(`Page ${currentStartPage}`, { x: 460, y: idxY, size: 10, font: boldFont, color: rgb(0.1, 0.3, 0.7) });
+        currentStartPage += item.fileObj.pageCount;
+        idxY -= 20;
+      });
+    }
+
+    // --- Section 14: Append Document Pages in Strict Requirement Order ---
     for (const item of includedDocs) {
       const srcDoc = await PDFDocument.load(item.fileObj.bytes);
       const pageIndices = srcDoc.getPageIndices();
@@ -1071,7 +1408,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       copiedPages.forEach(page => mergedPdf.addPage(page));
     }
 
-    // --- RULES 6.3 & 6.4: Add Footer (<tender_id> | Page X of Y) to Every Page ---
+    // --- Section 15: Add Footer (<tender_id> | Page X of Y) to Every Page ---
     const totalPages = mergedPdf.getPageCount();
     const allPages = mergedPdf.getPages();
 
@@ -1082,17 +1419,33 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
       const textSize = 9;
       const textWidth = font.widthOfTextAtSize(footerText, textSize);
 
-      // Centered horizontally, 18pt from bottom margin to not cover content (Rule 6.4)
+      // Centered horizontally, safe 16-18pt bottom margin with crisp white pill backdrop to guarantee 100% legibility on any document
+      const pillWidth = textWidth + 20;
+      const pillHeight = 16;
+      const pillX = (width - pillWidth) / 2;
+      const pillY = 12;
+
+      page.drawRectangle({
+        x: pillX,
+        y: pillY,
+        width: pillWidth,
+        height: pillHeight,
+        color: rgb(1, 1, 1),
+        opacity: 0.9,
+        borderColor: rgb(0.85, 0.88, 0.92),
+        borderWidth: 0.5
+      });
+
       page.drawText(footerText, {
         x: (width - textWidth) / 2,
-        y: 18,
+        y: pillY + 4,
         size: textSize,
         font: font,
-        color: rgb(0.25, 0.25, 0.25)
+        color: rgb(0.2, 0.25, 0.35)
       });
     }
 
-    // --- RULE 4.8: Trigger Download as <tender_id>_Package.pdf ---
+    // --- Task 4.8 / Section 12: Trigger Download as <tender_id>_Package.pdf ---
     const pdfBytes = await mergedPdf.save();
     const blob = new Blob([pdfBytes], { type: "application/pdf" });
     const downloadUrl = URL.createObjectURL(blob);
@@ -1120,46 +1473,6 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   }
 });
 
-// --- Drag and Drop Helper Utility ---
-function setupDragAndDrop(dropzoneEl, callback) {
-  if (!dropzoneEl) return;
-
-  ['dragenter', 'dragover'].forEach(eventName => {
-    dropzoneEl.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzoneEl.classList.add('dragover');
-    }, false);
-  });
-
-  ['dragleave', 'drop'].forEach(eventName => {
-    dropzoneEl.addEventListener(eventName, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzoneEl.classList.remove('dragover');
-    }, false);
-  });
-
-  dropzoneEl.addEventListener('drop', (e) => {
-    const dt = e.dataTransfer;
-    const files = dt.files ? Array.from(dt.files) : [];
-    if (files.length > 0) {
-      callback(files);
-    }
-  }, false);
-}
-
-// --- Escape HTML Helper Utility ---
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 // Keyframe animation for spinner
 const style = document.createElement('style');
 style.textContent = `
@@ -1169,6 +1482,9 @@ style.textContent = `
   }
 `;
 document.head.appendChild(style);
+
+// Listen to Index toggle checkbox change to update preview summary immediately
+document.getElementById('chkIncludeIndex')?.addEventListener('change', evaluateStatus);
 
 // Initialize initial evaluation state
 evaluateStatus();
