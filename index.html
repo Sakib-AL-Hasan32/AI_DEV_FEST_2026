@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tender Document Package Builder</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- pdf-lib CDN for client-side PDF merging and footer stamping -->
+  <script src="https://unpkg.com/pdf-lib@1.17.9/dist/pdf-lib.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="header-inner">
+      <div class="brand-group">
+        <div class="brand-icon">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 id="appTitle">Tender Document Package Builder</h1>
+          <p id="appSubtitle">Prepare, validate, and assemble compliance-ready bid packages</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Quick Sample / Demo Load Button -->
+        <button id="btnLoadDemo" class="btn-secondary" title="Load sample requirements and test files">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span id="txtLoadDemo">Load Demo Data</span>
+        </button>
+
+        <!-- Reset Button -->
+        <button id="btnReset" class="btn-secondary" title="Reset all fields">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span id="txtReset">Reset</span>
+        </button>
+
+        <!-- Language Switcher Pill (Task 4.9) -->
+        <div class="lang-toggle">
+          <button id="btnEn" class="lang-btn active">English</button>
+          <button id="btnBn" class="lang-btn">বাংলা</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- KPI / Statistics Summary Overview -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon blue">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+        </div>
+        <div class="stat-info">
+          <div class="stat-value" id="statTotalReq">0</div>
+          <div class="stat-label" id="lblStatTotalReq">Total Requirements</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon amber">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <div class="stat-info">
+          <div class="stat-value" id="statMandatory">0</div>
+          <div class="stat-label" id="lblStatMandatory">Mandatory Documents</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon purple">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+        </div>
+        <div class="stat-info">
+          <div class="stat-value" id="statUploaded">0</div>
+          <div class="stat-label" id="lblStatUploaded">Uploaded Files</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon emerald">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <div class="stat-info">
+          <div class="stat-value" id="statMatched">0 / 0</div>
+          <div class="stat-label" id="lblStatMatched">Matched Documents</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 1: Load requirements.json (Task 4.1) -->
+    <section class="card" id="sectionTender">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="step-badge">1</span>
+          <div>
+            <h2 class="card-title" id="headingTenderInfo">1. Tender Details</h2>
+            <p class="card-subtitle" id="descTenderInfo">Load requirements.json to define tender parameters and checklist order</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="dropzone" id="jsonDropzone">
+        <input type="file" id="jsonInput" accept=".json,application/json" />
+        <div class="dropzone-icon">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+        </div>
+        <div class="dropzone-title" id="txtJsonDropTitle">Drag & drop requirements.json here, or click to browse</div>
+        <div class="dropzone-desc" id="txtJsonDropDesc">Accepts valid JSON file specifying tender info and requirements</div>
+      </div>
+
+      <div id="tenderMeta" class="meta-grid hidden"></div>
+    </section>
+
+    <!-- Step 2: Upload Document Files (Task 4.2 & 4.6) -->
+    <section class="card" id="sectionUploads">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="step-badge">2</span>
+          <div>
+            <h2 class="card-title" id="headingUploads">2. Upload Document Files</h2>
+            <p class="card-subtitle" id="descUploads">Upload candidate PDF documents. Content duplicates are automatically detected</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="dropzone" id="pdfDropzone">
+        <input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple />
+        <div class="dropzone-icon">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+        </div>
+        <div class="dropzone-title" id="txtPdfDropTitle">Drag & drop PDF files here, or click to browse</div>
+        <div class="dropzone-desc" id="txtPdfDropDesc">Select multiple PDF files (up to 30 files, 50MB total). Non-PDF files are rejected.</div>
+      </div>
+
+      <div class="files-summary-bar hidden" id="filesSummaryBar">
+        <span id="txtFilesCount">Uploaded: 0 files</span>
+        <button id="btnClearAllFiles" class="btn-remove" style="border:none;">
+          <svg style="width:14px;height:14px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          <span id="txtClearAllFiles">Clear All Files</span>
+        </button>
+      </div>
+
+      <div id="fileUploadList" class="file-cards-grid"></div>
+    </section>
+
+    <!-- Step 3: Document Matching & Checklist Table (Tasks 4.3, 4.4, 4.5) -->
+    <section class="card" id="sectionChecklist">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="step-badge">3</span>
+          <div>
+            <h2 class="card-title" id="headingRequirements">3. Document Matching & Checklist</h2>
+            <p class="card-subtitle" id="descRequirements">Assign uploaded files 1-to-1 and specify expiry dates where required</p>
+          </div>
+        </div>
+        <div class="toolbar-buttons">
+          <!-- Bonus Task: Auto-Match Suggestion -->
+          <button id="btnAutoMatch" class="btn-action primary" title="Suggest matches based on document and file names">
+            <svg style="width:16px;height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            <span id="txtAutoMatch">Auto-Match Files</span>
+          </button>
+
+          <!-- Bonus Task: Export Checklist as CSV -->
+          <button id="btnExportCsv" class="btn-action" title="Export current checklist as CSV file">
+            <svg style="width:16px;height:16px;" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span id="txtExportCsv">Export CSV</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table id="checklistTable">
+          <thead>
+            <tr>
+              <th id="thOrder" style="width: 70px;">Order</th>
+              <th id="thDocName">Document Name</th>
+              <th id="thType" style="width: 110px;">Type</th>
+              <th id="thAssigned" style="min-width: 200px;">Assigned File</th>
+              <th id="thExpiry" style="min-width: 170px;">Expiry Date</th>
+              <th id="thStatus" style="width: 160px;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="checklistBody">
+            <tr>
+              <td colspan="6" style="text-align:center; padding: 32px; color: var(--text-muted);" id="txtEmptyTableMsg">
+                Please load a valid requirements.json file to view checklist requirements.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Step 4: Verification & Package Generation (Tasks 4.7, 4.8 & Section 6) -->
+    <section class="card" id="sectionGenerate">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="step-badge">4</span>
+          <div>
+            <h2 class="card-title" id="headingVerification">4. Validation & Package Generation</h2>
+            <p class="card-subtitle" id="descVerification">Review blocking issues and assemble the final numbered PDF package</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Blocking alert or Ready banner -->
+      <div id="blockingAlert" class="alert-box">
+        <strong id="alertHeading">Initial State:</strong>
+        <span id="alertMsg">Load requirements.json to begin checklist validation.</span>
+      </div>
+
+      <div class="generate-actions">
+        <div class="package-meta-summary" id="pkgSummary" style="font-size: 14px; color: var(--text-muted);">
+          <!-- Summary info like document count & estimated pages will display here -->
+        </div>
+
+        <button id="generateBtn" class="btn-generate" disabled>
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          <span id="txtGenerateBtn">Generate & Download Package</span>
+        </button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
